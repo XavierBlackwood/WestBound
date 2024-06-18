@@ -1,0 +1,423 @@
+-- Загрузка библиотеки Orion
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+
+local Camera = workspace.CurrentCamera
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local ESP = {}
+local ESP_ENABLED = false
+_G.AimbotEnabled = true
+_G.TeamCheck = false -- If set to true then the script would only lock your aim at enemy team members.
+_G.AimPart = "Head" -- Where the aimbot script would lock at.
+_G.Sensitivity = 0 -- How many seconds it takes for the aimbot script to officially lock onto the target's aimpart.
+
+_G.CircleSides = 64 -- How many sides the FOV circle would have.
+_G.CircleColor = Color3.fromRGB(255, 255, 255) -- (RGB) Color that the FOV circle would appear as.
+_G.CircleTransparency = 0.7 -- Transparency of the circle.
+_G.CircleRadius = 150 -- The radius of the circle / FOV.
+_G.CircleFilled = false -- Determines whether or not the circle is filled.
+_G.CircleVisible = true -- Determines whether or not the circle is visible.
+_G.CircleThickness = 0
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+FOVCircle.Radius = _G.CircleRadius
+FOVCircle.Filled = _G.CircleFilled
+FOVCircle.Color = _G.CircleColor
+FOVCircle.Visible = _G.CircleVisible
+FOVCircle.Radius = _G.CircleRadius
+FOVCircle.Transparency = _G.CircleTransparency
+FOVCircle.NumSides = _G.CircleSides
+FOVCircle.Thickness = _G.CircleThickness
+
+-- Инициализация окна и вкладки ESP
+local Window = OrionLib:MakeWindow({Name = "мм хуйня ебанная", HidePremium = false, SaveConfig = true, ConfigFolder = "OrionTest"})
+local ESPTab = Window:MakeTab({
+    Name = "ESP",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+local Section = ESPTab:AddSection({
+    Name = "ESP Настройка"
+})
+
+-- Aimbot Settings
+local AimbotTab = Window:MakeTab({
+    Name = "Aimbot",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local AimbotSection = AimbotTab:AddSection({
+    Name = "Aimbot Настройка"
+})
+
+
+AimbotSection:AddToggle({
+    Name = "Включить Aimbot",
+    Default = false,
+    Callback = function(Value)
+        _G.AimbotEnabled = Value
+    end
+})
+
+AimbotSection:AddToggle({
+    Name = "Team Check",
+    Default = false,
+    Callback = function(Value)
+        _G.TeamCheck = Value
+    end
+})
+
+AimbotSection:AddDropdown({
+    Name = "Aim Part",
+    Default = "Head",
+    Options = {"Head", "Torso"},
+    Callback = function(Value)
+        _G.AimPart = Value
+    end
+})
+
+AimbotSection:AddSlider({
+    Name = "Sensitivity",
+    Min = 0,
+    Max = 10,
+    Default = 0,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Sensitivity",
+    Callback = function(Value)
+        _G.Sensitivity = Value
+    end
+})
+
+-- Добавление переключателя для ESP
+local ESPEnabledToggle = ESPTab:AddToggle({
+    Name = "Включить ESP",
+    Default = false,
+    Callback = function(Value)
+        ESP_ENABLED = Value
+        if ESP_ENABLED then
+            toggleESP()  -- Включить ESP
+        else
+            for player, _ in pairs(ESP) do
+                removeESP(player)  -- Выключить ESP для всех игроков
+            end
+        end
+    end    
+})
+
+-- Function to create ESP for a player
+local function createESP(player)
+    if ESP[player] then
+        return  -- If ESP for this player already exists, exit the function
+    end
+
+    local Box = Drawing.new("Square")
+    Box.Visible = false
+    Box.Thickness = 2
+    Box.Transparency = 1
+
+    local HealthText = Drawing.new("Text")
+    HealthText.Visible = false
+    HealthText.Size = 16
+    HealthText.Center = true
+    HealthText.Outline = true
+    HealthText.OutlineColor = Color3.fromRGB(0, 0, 0)
+
+    local WeaponText = Drawing.new("Text")
+    WeaponText.Visible = false
+    WeaponText.Size = 14
+    WeaponText.Center = true
+    WeaponText.Outline = true
+    WeaponText.OutlineColor = Color3.fromRGB(0, 0, 0)
+
+    local NameText = Drawing.new("Text")
+    NameText.Visible = false
+    NameText.Size = 18
+    NameText.Center = true
+    NameText.Outline = true
+    NameText.OutlineColor = Color3.fromRGB(0, 0, 0)
+    NameText.Text = player.Name
+
+    ESP[player] = {
+        Box = Box,
+        HealthText = HealthText,
+        WeaponText = WeaponText,
+        NameText = NameText,
+        LastEquipped = nil,
+        TextOffset = Vector2.new(0, 0) -- Offset for WeaponText relative to player
+    }
+
+    local function updateESP()
+        if not ESP[player] then
+            return
+        end
+
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Team then
+            local RootPart = player.Character.HumanoidRootPart
+            local Humanoid = player.Character.Humanoid
+
+            local Camera = game.Workspace.CurrentCamera
+            local Vector, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
+
+            if OnScreen then
+                -- Determine team color
+                local teamColor = player.Team.TeamColor.Color
+
+                -- Update box properties
+                Box.Position = Vector2.new(Vector.X - Box.Size.X / 2, Vector.Y - Box.Size.Y / 2)
+                Box.Color = teamColor
+                Box.Visible = ESP_ENABLED
+
+                -- Update health text
+                local hp = Humanoid.Health
+                local maxHp = Humanoid.MaxHealth
+                local hpDisplay = string.format("%d / %d", hp, maxHp)
+
+                HealthText.Text = hpDisplay
+                HealthText.Position = Vector2.new(Vector.X, Vector.Y + Box.Size.Y / 2 + 20)
+                HealthText.Color = teamColor
+                HealthText.Visible = ESP_ENABLED
+
+                -- Update weapon text (current item in hand)
+                local currentWeapon = Humanoid and Humanoid.Parent and Humanoid.Parent:FindFirstChildOfClass("Tool")
+                if currentWeapon then
+                    local weaponName = currentWeapon.Name
+                    WeaponText.Text = weaponName
+                    WeaponText.Position = Vector2.new(Vector.X, Vector.Y + Box.Size.Y / 2 + 40)
+                    WeaponText.Color = teamColor
+                    WeaponText.Visible = ESP_ENABLED
+                    ESP[player].LastEquipped = weaponName
+                else
+                    WeaponText.Visible = false
+                    ESP[player].LastEquipped = nil
+                end
+
+                -- Update name text
+                NameText.Position = Vector2.new(Vector.X, Vector.Y - Box.Size.Y / 2 - 20)
+                NameText.Color = teamColor
+                NameText.Visible = ESP_ENABLED
+            else
+                Box.Visible = false
+                HealthText.Visible = false
+                WeaponText.Visible = false
+                NameText.Visible = false
+                ESP[player].LastEquipped = nil
+            end
+        else
+            Box.Visible = false
+            HealthText.Visible = false
+            WeaponText.Visible = false
+            NameText.Visible = false
+            ESP[player].LastEquipped = nil
+        end
+    end
+
+    -- Connect updateESP function to RenderStepped event for continuous update
+    local RunService = game:GetService("RunService")
+    if RunService and RunService.RenderStepped then
+        ESP[player].RenderSteppedConnection = RunService.RenderStepped:Connect(updateESP)
+    else
+        warn("RunService or RenderStepped is not available!")
+    end
+
+    -- Cleanup ESP elements when player character is removed
+    ESP[player].CharacterAddedConnection = player.CharacterAdded:Connect(function(character)
+        updateESP()
+    end)
+    ESP[player].CharacterRemovingConnection = player.CharacterRemoving:Connect(function()
+        removeESP(player)
+    end)
+end
+
+-- Function to remove ESP for a player
+local function removeESP(player)
+    if ESP[player] then
+        -- Disconnect RenderStepped event
+        if ESP[player].RenderSteppedConnection then
+            ESP[player].RenderSteppedConnection:Disconnect()
+        end
+        -- Disconnect CharacterAdded event
+        if ESP[player].CharacterAddedConnection then
+            ESP[player].CharacterAddedConnection:Disconnect()
+        end
+        -- Disconnect CharacterRemoving event
+        if ESP[player].CharacterRemovingConnection then
+            ESP[player].CharacterRemovingConnection:Disconnect()
+        end
+        -- Remove and clean up ESP elements
+        ESP[player].Box.Visible = false
+        ESP[player].HealthText.Visible = false
+        ESP[player].WeaponText.Visible = false
+        ESP[player].NameText.Visible = false
+        ESP[player].Box:Remove()
+        ESP[player].HealthText:Remove()
+        ESP[player].WeaponText:Remove()
+        ESP[player].NameText:Remove()
+        ESP[player] = nil
+    end
+end
+
+-- Function to toggle ESP visibility
+local function toggleESP()
+    ESP_ENABLED = not ESP_ENABLED
+
+    -- Toggle ESP for each player
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        if player ~= game.Players.LocalPlayer then
+            if ESP_ENABLED then
+                createESP(player)
+            else
+                removeESP(player)
+            end
+        end
+    end
+end
+
+-- Create ESP for new players and existing players
+game:GetService("Players").PlayerAdded:Connect(function(player)
+    createESP(player)
+end)
+
+for _, player in pairs(game:GetService("Players"):GetPlayers()) do
+    if player ~= game.Players.LocalPlayer then
+        createESP(player)
+    end
+end
+
+-- Remove ESP when players leave
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
+
+-- UserInputService to handle aimbot functionality
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local Holding = false
+local IsAiming = false
+local ClosestPlayer = nil
+
+
+local function GetPlayersInFOV()
+    local PlayersInFOV = {}
+
+    for _, v in next, Players:GetPlayers() do
+        if v ~= LocalPlayer then
+            if _G.TeamCheck then
+                if v.Team ~= LocalPlayer.Team then
+                    local Character = v.Character
+                    if Character and Character:FindFirstChild("HumanoidRootPart") and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health > 0 then
+                        local ScreenPoint = Camera:WorldToScreenPoint(Character.HumanoidRootPart.Position)
+                        local VectorDistance = (Vector2.new(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y) - Vector2.new(ScreenPoint.X, ScreenPoint.Y)).Magnitude
+
+                        if VectorDistance < _G.CircleRadius then
+                            table.insert(PlayersInFOV, v)
+                        end
+                    end
+                end
+            else
+                local Character = v.Character
+                if Character and Character:FindFirstChild("HumanoidRootPart") and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health > 0 then
+                    local ScreenPoint = Camera:WorldToScreenPoint(Character.HumanoidRootPart.Position)
+                    local VectorDistance = (Vector2.new(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y) - Vector2.new(ScreenPoint.X, ScreenPoint.Y)).Magnitude
+
+                    if VectorDistance < _G.CircleRadius then
+                        table.insert(PlayersInFOV, v)
+                    end
+                end
+            end
+        end
+    end
+
+    return PlayersInFOV
+end
+
+UserInputService.InputBegan:Connect(function(Input)
+    if Input.KeyCode == Enum.KeyCode.LeftAlt then
+        Holding = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(Input)
+    if Input.KeyCode == Enum.KeyCode.LeftAlt then
+        Holding = false
+        IsAiming = false  -- Reset aiming state on release
+    end
+end)
+
+-- RenderStepped function to handle aimbot logic
+RunService.RenderStepped:Connect(function()
+    FOVCircle.Position = Vector2.new(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+    FOVCircle.Radius = _G.CircleRadius
+    FOVCircle.Filled = _G.CircleFilled
+    FOVCircle.Color = _G.CircleColor
+    FOVCircle.Visible = _G.AimbotEnabled
+    FOVCircle.Radius = _G.CircleRadius
+    FOVCircle.Transparency = _G.CircleTransparency
+    FOVCircle.NumSides = _G.CircleSides
+    FOVCircle.Thickness = _G.CircleThickness
+
+    if Holding and _G.AimbotEnabled then
+        if not IsAiming then
+            local PlayersInFOV = GetPlayersInFOV()
+            ClosestPlayer = nil
+            local ClosestDistance = math.huge
+
+            -- Find closest player in FOV
+            for _, Player in ipairs(PlayersInFOV) do
+                local Character = Player.Character
+                if Character and Character[_G.AimPart] then
+                    local ScreenPoint = Camera:WorldToScreenPoint(Character[_G.AimPart].Position)
+                    local VectorDistance = (Vector2.new(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y) - Vector2.new(ScreenPoint.X, ScreenPoint.Y)).Magnitude
+
+                    if VectorDistance < ClosestDistance then
+                        ClosestPlayer = Player
+                        ClosestDistance = VectorDistance
+                    end
+                end
+            end
+
+            -- Aim at closest player
+            if ClosestPlayer then
+                IsAiming = true
+                local Character = ClosestPlayer.Character
+                if Character and Character[_G.AimPart] then
+                    TweenService:Create(Camera, TweenInfo.new(_G.Sensitivity, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {CFrame = CFrame.new(Camera.CFrame.Position, Character[_G.AimPart].Position)}):Play()
+                end
+            end
+        else
+            -- Continue aiming at current ClosestPlayer
+            if ClosestPlayer then
+                local Character = ClosestPlayer.Character
+                if Character and Character[_G.AimPart] then
+                    TweenService:Create(Camera, TweenInfo.new(_G.Sensitivity, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {CFrame = CFrame.new(Camera.CFrame.Position, Character[_G.AimPart].Position)}):Play()
+                end
+            end
+        end
+    else
+        IsAiming = false  -- Reset aiming state if not holding
+    end
+end)
+
+-- Create ESP for existing players
+for _, player in pairs(game:GetService("Players"):GetPlayers()) do
+    if player ~= game.Players.LocalPlayer then
+        createESP(player)
+    end
+end
+
+-- Create ESP for new players
+game:GetService("Players").PlayerAdded:Connect(function(player)
+    createESP(player)
+end)
+
+-- Remove ESP when players leave
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
